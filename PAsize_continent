@@ -1,0 +1,202 @@
+#PA size by continent smoothed density histogram                                                                                                                            #
+#author: Emma Steigerwald                                                                                                                                                   #
+#############################################################################################################################################################################
+
+#Set up working environment
+setwd("G:/Shared drives/AW-Data/ConservationWG/ConservationWG_GithubRepo/Data")
+#Load libraries
+library(dplyr) #yes
+library(ggplot2) #yes
+library(plyr) #yes
+library(RColorBrewer)
+library(stringr) #yes
+library(cowplot) #NO
+library(SciViews)
+library(tidyr) #yes
+library(forcats)
+library(lessR)
+library(data.table) #yes
+library(khroma) #Maybe use https://www.rdocumentation.org/packages/ggsci/versions/2.9 instead?
+muted <- colour("muted")
+
+
+#####################
+#Load all species found in all PAs
+SpPA <- read.csv("Data using Amphibian Ranges for Species Richness/All_Amphibia with WDPA one to many.csv")
+
+#CHekc that blank WDPA_PIDs mean that a species doesn't occur on any PAs. 
+length(unique(SpPA$binomial)) #total number of frog spp in this spreadsheet
+#5976
+#total number of species not assoc with PAs + total number assoc with PAs
+length(unique(SpPA$binomial[SpPA$WDPA_PID==""])) + length(unique(SpPA$binomial[SpPA$WDPA_PID!=""])) 
+#These numbers are equal, so we are good to go!
+
+#Associate a threat level with these amphibians
+threatdata <- read.csv("redlist/AWebStatus.csv")
+threatdata <- threatdata[ , which(names(threatdata) %in% c("binomial", "AWiucn"))]
+#Remove duplicated rows (species occuring in two+ biomes)
+threatdata <- threatdata[!duplicated(threatdata), ]
+#Anything with a blank for AWiucn I'm going to call DD
+#I think what these are is newly-described species
+#But this begs the question of, when a previously-known species is split into 2+ species... is the species that retains the name
+#of the original species moved to DD, or does it usually retain the status of the species before the split?
+#Homogenize/complete the status labelling
+threatdata$AWiucn[threatdata$AWiucn==""] <- "In assessment"
+threatdata$AWiucn[threatdata$AWiucn=="Critically Endangered (CR)" | threatdata$AWiucn=="Critically Endangered (CR) - Provisional"] <- "CR"
+threatdata$AWiucn[threatdata$AWiucn=="Vulnerable (VU)" | threatdata$AWiucn=="Vulnerable (VU) - Provisional"] <- "VU"
+threatdata$AWiucn[threatdata$AWiucn=="Least Concern (LC)" | threatdata$AWiucn=="Least Concern (LC) - Provisional"] <- "LC"
+threatdata$AWiucn[threatdata$AWiucn=="Data Deficient (DD)" | threatdata$AWiucn=="Data Deficient (DD) - Provisional"] <- "DD"
+threatdata$AWiucn[threatdata$AWiucn=="Near Threatened (NT)" | threatdata$AWiucn=="Near Threatened (NT) - Provisional"] <- "NT"
+threatdata$AWiucn[threatdata$AWiucn=="Endangered (EN)" | threatdata$AWiucn=="Endangered (EN) - Provisional"] <- "EN"
+threatdata$AWiucn[threatdata$AWiucn=="Extinct in the Wild (EW)" | threatdata$AWiucn=="Extinct in the Wild (EW) - Provisional"] <- "EW"
+threatdata$AWiucn[threatdata$AWiucn=="Extinct (EX)" | threatdata$AWiucn=="Extinct (EX) - Provisional"] <- "EX"
+threatdata$AWiucn <- as.factor(threatdata$AWiucn)
+levels(threatdata$AWiucn)
+SpPA <- left_join(SpPA, threatdata, by=c("binomial"="binomial"))
+
+#Label amphibians not on PAs as "not protected"
+SpPA$WDPA_PID[SpPA$WDPA_PID == ""] <- "NotProtected"
+SpPaSum <- SpPA %>%
+  dplyr::group_by(WDPA_PID) %>%
+  dplyr::summarise(totRichness = length(unique(binomial))) 
+
+#Now, while I have the species, their status, and their WDPAs in a sheet, I need to make a donut for each continent: protected v. unprotected species, 
+#proportion of species that are of each IUCN status. So got to add that continent information from WDPA data. 
+xtra <- read.csv("All_Amphibia_Country_Hemi2.csv")
+xtra <- xtra[ , which(names(xtra) %in% c("binomial", "CONTINENT"))]
+
+ThreatSum <- SpPA %>%
+  dplyr::group_by(WDPA_PID, AWiucn) %>%
+  dplyr::summarise(count = length(unique(binomial)))     
+#Label the catch all for amphibians not on PAs
+ThreatSum$WDPA_PID[ThreatSum$WDPA_PID == ""] <- "NotProtected"
+#Make this horizontal format
+ThreatSum <- ThreatSum %>% spread(AWiucn, count)
+SpPaSum <- left_join(SpPaSum, ThreatSum, by=c("WDPA_PID"="WDPA_PID"))
+#Calculate total number threatened species
+SpPaSum$AllThreat <- rowSums(SpPaSum[, c('CR', 'EN', 'EW', 'EX', 'NT', 'VU')], na.rm=TRUE) 
+#Total species assessed (not DD or in assessment
+SpPaSum$AllAssessed <- rowSums(SpPaSum[, c('CR', 'EN', 'EW', 'EX', 'NT', 'VU', 'LC')], na.rm=TRUE) 
+#Total proportion threatened species
+SpPaSum$ThreatProp <- SpPaSum$AllThreat/SpPaSum$AllAssessed
+
+#SAVE SpPA for the cumulative amphibian species covered, below!!!
+#Now we've gotten what we want fromt his crazy large table, remove it.
+remove(SpPA)                 
+
+#####################
+#Finally, import the country, continent, hemisphere info
+xtra <- read.csv("World_Database_Protected_Areas/WDPA_all.csv")
+names(xtra)[names(xtra) == "NAME_EN"] <- "Country"
+names(xtra)[names(xtra) == "ï..WDPA_PID"] <- "WDPA_PID"
+xtra <- xtra[ , which(names(xtra) %in% c("WDPA_PID", "CONTINENT", "Country"))]
+xtra <- unique(xtra)
+
+#Now bring in the WDPA data from 
+###WE STILL NEED TO FIX ENCODING ISSUES HERE!!!
+wdpa <- read.csv("World_Database_Protected_Areas/WDPA_WDOECM_Jul2021_Public_all_csv/WDPA_WDOECM_Jul2021_Public_all_csv.csv")
+#We need to take out marine area from what we're considering as protected area size!
+wdpa$GIS_T_AREA <-wdpa$GIS_AREA - wdpa$GIS_M_AREA
+#Make status year numeric for following analysis
+wdpa$STATUS_YR <- as.numeric(wdpa$STATUS_YR)
+#Remove blank rows. 
+wdpa <- wdpa[rowSums(is.na(wdpa)) != ncol(wdpa),]
+
+
+#Now, merge...
+#THIS IS ALL WDPAs WHETHER THEY HAVE AMPHIBIANS OR NOT! 
+SpPaSum <- left_join(SpPaSum, wdpa, by=c("WDPA_PID"="WDPA_PID"))
+SpPaSum <- left_join(SpPaSum, xtra, by=c("WDPA_PID"="WDPA_PID"))
+#Remove extra columns
+torem <- c("ï..TYPE", "WDPAID", "PA_DEF", "DESIG", "DESIG_ENG", "DESIG_TYPE", "INT_CRIT", "MARINE", "REP_M_AREA", "GIS_M_AREA", "REP_AREA", "GIS_AREA", "NO_TAKE", "NO_TK_AREA", "STATUS", "GOV_TYPE", "OWN_TYPE", "MANG_AUTH", "MANG_PLAN", "VERIF", "METADATAID", "SUB_LOC", "PARENT_ISO3", "ISO3", "SUPP_INFO", "CONS_OBJ", "all")           
+SpPaSum <- SpPaSum[ , -which(names(SpPaSum) %in% torem)]
+           
+#We decided to remove PAs where amphibians don't occur from our analyses
+RHT_WDPA <- SpPaSum[SpPaSum$totRichness > 0,]
+#Remove blank rows
+RHT_WDPA <- RHT_WDPA[rowSums(is.na(RHT_WDPA)) != ncol(RHT_WDPA),]
+
+#Get rid of everything we don't need, because it burdens the system
+remove(xtra, wdpa, torem, SpPaSum, threatdata, ThreatSum)
+
+#Remove records that do not seem to correspond to established protected areas, including those with their area name 
+#recorded as “area not protected” (2599 polygons), or their status recorded as “degazetted,”“proposed,”“recommended,”
+#“in preparation,” or “unset” (1024 polygons and 1751 points). Check for them by manually revising the search results of
+#the following
+RHT_WDPA %>% filter_all(any_vars(grepl("not protected|degazetted|proposed|recommended|in preparation|unset",.)))
+#Filter out PID 555564362 and 305921, which are both "proposed" rather than created it looks like  
+RHT_WDPA <- RHT_WDPA[!(RHT_WDPA$WDPA_PID=="555564362" | RHT_WDPA$WDPA_PID=="305921"),]
+#Dataframe shrinks from 137,660 to 137,658;   so this worked as expected!!                   
+                   
+                 
+#####################################################################################
+#ALL QUESTIONS HAVING TO DO WITH PA AREA
+#####################################################################################
+
+#Get rid of any NA values in columns of interest
+AR <- RHT_WDPA[RHT_WDPA$GIS_T_AREA != 0, ]
+AR <- AR[!is.na(AR$GIS_T_AREA), ]
+
+################
+# Histogram of PA area
+jpeg(file="../Figures/PA_Area_Hist.jpeg")
+                      ggplot(AR, aes(x=GIS_T_AREA))+
+                        geom_bar(stat="bin", binwidth = 2000, color = "black", fill = "#117733")+
+                        labs(title="Global distribution of PA sizes",
+                              y = "Count") +
+                        scale_x_continuous(name = "PA area (km^2") +
+                        theme(axis.text.x = element_text(angle=45), panel.background = element_rect(fill = "white", colour = "grey50")) 
+                      dev.off()
+
+#Same plot, now with areas being log-transformed                   
+jpeg(file="../Figures/PA_Area_Hist_log.jpeg", height=1000, width=4000)
+ggplot(AR, aes(x=log(GIS_T_AREA)))+
+     geom_bar(stat="bin", binwidth=1, color = "black", fill = "#117733")+
+     labs(title="Global distribution of log (PA area)") +
+     scale_x_continuous(name = "PA area (km^2)\nlog scale", breaks=seq(-15, 15, by=5), labels=round(exp(seq(-15, 15, by=5)), digits=2), limits=c(-15, 15)) +
+     scale_y_continuous(name = "Count", expand = c(0.008, 0.008)) +  
+     theme(axis.text.x = element_text(angle=45, size=45, vjust=0.5), axis.text.y = element_text(size=45), axis.title=element_text(size=45), 
+        plot.title=element_text(size=45), legend.text=element_text(size=40), legend.title=element_text(size=45), legend.key.height = unit(3, "cm"), 
+        legend.key.width = unit(1.5,"cm"), panel.background = element_rect(fill = "white", colour = "grey50"))
+ dev.off()  
+
+AR$CONTINENT<-as.factor(AR$CONTINENT)
+levels(AR$CONTINENT)
+
+meds <- AR %>%
+    group_by(CONTINENT) %>%
+    dplyr::summarise(m=median(GIS_T_AREA, na.rm=TRUE))       
+
+AR$CONTINENT <- factor(AR$CONTINENT, levels = rev(c("Europe", "Australia and New Zealand", "Canada and U.S.A.", "Asia", "Melanesia, Micronesia, and Polynesia", "Central America, Mexico, and the Caribbean", "South America", "Southeast Asia", "Africa", "Madagascar")))  
+jpeg(file="../Figures/PA_Area_Hist_continent_log_density.jpeg", height=1500, width=2500)                   
+ggplot(AR, aes(x=GIS_T_AREA, y=CONTINENT)) +
+  geom_density_ridges(scale=1, rel_min_height=.0001, quantile_lines=T, quantiles=2, fill="black", color="white") +
+  scale_y_discrete(name="", expand = c(0.01, 0)) +
+  scale_x_continuous(trans='log10',
+                     breaks=trans_breaks('log10', function(x) 10^x),
+                     labels=trans_format('log10', math_format(10^.x)))  + 
+  ggtitle("")+                 
+  theme_ridges() +
+  theme(text=element_text(family="Calibri"), 
+      plot.title = element_text(size=35), 
+      legend.position = "none", 
+      axis.title = element_text(hjust=-4, size=34), 
+      axis.text.x = element_text(angle=45, size=45, vjust=0, hjust=0), 
+      axis.text.y = element_text(size=45), 
+      panel.background = element_rect(fill = "white", colour = "grey50"), 
+      plot.margin=unit(c(0.5, 1.5, 0.5, 0.5),"cm"))
+dev.off()   
+
+                                                   
+  #Same plot broken down by continent
+  jpeg(file="../Figures/PA_Area_Hist_continent_log.jpeg", height=2000, width=1000)
+  ggplot(AR, aes(x=log(GIS_T_AREA)))+
+    geom_bar(stat="bin", binwidth = 1, color = "black", fill = "#117733")+
+    facet_wrap(~CONTINENT, ncol = 1)+
+      labs(title="Global distribution of log(PA area)") +
+      scale_x_continuous(name = "PA area (km^2)\nlog scale", breaks=seq(-25, 10, by=5), labels=round(exp(seq(-25, 10, by=5)), digits=2), limits=c(-25, 10), expand = c(0.008, 0.008)) +
+       scale_y_continuous(name = "Count", expand = c(0.008, 0.008)) +  
+      theme(axis.text.x = element_text(angle=35, size=15, vjust=0.5), axis.text.y = element_text(size=15), axis.title=element_text(size=20), 
+          plot.title=element_text(size=25), panel.background = element_rect(fill = "white", colour = "grey50"), plot.margin=unit(c(0.1, 0.1, 0.1, 0.1),"cm"), strip.text.x = element_text(margin = margin(0, 0, 0, 0, "cm")), strip.text = element_text(size=18))  
+  dev.off()                
+                   
