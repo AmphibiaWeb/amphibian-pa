@@ -1,30 +1,26 @@
-#Exploratory Analyses of AWeb Conservation Working Group Data                                                                                                               #
-#author: Emma Steigerwald                                                                                                                                                   #
-#############################################################################################################################################################################
+# R language
+
+# Create supplementary figures with barplots of species richness, threatened species, and unprotected species per country
 
 #Set up working environment
-setwd("G:/Shared drives/AW-Data/ConservationWG/ConservationWG_GithubRepo/Data")
-#Load libraries
-library(dplyr) #yes
-library(ggplot2) #yes
-library(plyr) #yes
+library(dplyr) 
+library(ggplot2) 
+library(plyr) 
 library(hexbin)
 library(RColorBrewer)
-library(stringr) #yes
-library(cowplot) #NO
+library(stringr) 
+library(cowplot) 
 library(SciViews)
-library(tidyr) #yes
+library(tidyr) 
 library(forcats)
-library(khroma) #Maybe use https://www.rdocumentation.org/packages/ggsci/versions/2.9 instead?
+library(khroma) 
 muted <- colour("muted")
 library(lessR)
-library(data.table) #yes
-library(extrafont)
-font_import()
+library(data.table) 
 
+# Establish color palette for plotting
 IUCNColors <- c("DD" = "Grey", "In assessment"="white", "LC" = "Chartreuse4", "NT"="Greenyellow", "VU"="yellow", "EN"="Orange", "CR"="Red", "EW"="Darkmagenta", "EX"="black")
 
-#####################
 #Load in all species with range data
 Amph <- read.csv("Data using Amphibian Ranges for Species Richness/Amphibians_w_ranges.csv")
 length(unique(Amph$binomial))   #7094 species
@@ -42,30 +38,26 @@ keep<-c("binomial", "code")
 Amph<-Amph[,names(Amph)%in%keep]
 names(Amph)<-c("binomial", "AWiucn")
 
-#Load all species found in all PAs
+# Load all species found in all PAs
 SpPA <- read.csv("Data using Amphibian Ranges for Species Richness/All_Amphibia with WDPA one to many.csv")
 length(unique(SpPA$binomial)) #6932                               
                    
-#####################################################################################
-#ALL QUESTIONS HAVING TO DO WITH COUNTRIES
-#####################################################################################
 #Import country-richness data
-
 CountryRich <- read.csv("Data using Amphibian Ranges for Species Richness/Species+Continent+Hemisphere.csv")
 keep<-c("binomial", "CONTINENT", "NAME_EN")
 CountryRich<-CountryRich[,names(CountryRich)%in%keep]    
 country <- join(CountryRich, Amph, by="binomial") 
-
 country <- join(country, SpPA, by="binomial") 
 #Any species without a WDPAPID listed is considered unprotected
 country$WDPA_PID<-country$WDPA_PID %>% replace_na('NotProtected')
 country$NAME_EN <- gsub("People's Republic of China","China",as.character(country$NAME_EN))
 country$NAME_EN <- gsub("Democratic Republic of the Congo","the Congo",as.character(country$NAME_EN))
                    
-#summarize by each category per country
+#summarize by each threatened category per country
 countsum <- country %>%
   dplyr::group_by(NAME_EN, AWiucn) %>%                   
-  dplyr::summarise(CategoryCount = length(unique(binomial)))           
+  dplyr::summarise(CategoryCount = length(unique(binomial)))      
+
 #total country threatened richness
 totsum <- country %>%
   dplyr::group_by(NAME_EN) %>%                   
@@ -81,18 +73,28 @@ totsum$PropThreat <- totsum$TotalThreatened/totsum$TotalAssessed
 totsum$PropUnprotected <- totsum$TotalUnprotected/totsum$Total  
 totsum$PropEndangeredPlus <- totsum$TotEndangeredPlus/totsum$TotalAssessed                       
 countsum <- join(countsum, totsum, by="NAME_EN")
-#I want levels to be ordered by endangerement
+
+# Join data on threatened and total richness
 countsum$AWiucn <- factor(countsum$AWiucn, levels = rev(c("EX", "EW", "CR", "EN", "VU", "NT", "LC", "DD", "In assessment")))
-countsum <- filter(countsum, !is.na(AWiucn))                 
-                   
-                   
-#########################                   
-                   
+countsum <- filter(countsum, !is.na(AWiucn))   
+
+# For unprotected species only, summarize by each category per country
+unprosum <- country[country$WDPA_PID=="NotProtected",] %>%
+  dplyr::group_by(NAME_EN, AWiucn) %>%                   
+  dplyr::summarise(PAstatus="NotProtected", PACatCount = length(unique(binomial)))                   
+#For protected species only, summarize by each category per country
+prosum <- country[country$WDPA_PID!="NotProtected",] %>%
+  dplyr::group_by(NAME_EN, AWiucn) %>%                   
+  dplyr::summarise(PAstatus="Protected", PACatCount = length(unique(binomial))) 
+totes <- rbind(unprosum, prosum) 
+totes <- join(totes, totsum, by="NAME_EN")
+#I want levels to be ordered by endangerement
+totes$AWiucn <- factor(totes$AWiucn, levels = rev(c("EX", "EW", "CR", "EN", "VU", "NT", "LC", "DD", "In assessment")))
+totes <- filter(totes, !is.na(AWiucn))
+
 #Top 10 most species-rich countries                   
 length(unique(countsum$NAME_EN[countsum$Total>315]))
-#10
-plotA <- countsum[countsum$Total>315,]
-                   
+plotA <- countsum[countsum$Total>315,]                  
 a<- ggplot(data=plotA, aes(x=reorder(NAME_EN, Total), y=CategoryCount, fill=AWiucn)) +
   geom_bar(stat="identity", color="black", size=0.4, width=0.8)+
   labs(title="A.") +
@@ -109,16 +111,11 @@ a<- ggplot(data=plotA, aes(x=reorder(NAME_EN, Total), y=CategoryCount, fill=AWiu
         legend.title=element_blank(), 
         legend.key.height = unit(1, "cm"), 
         legend.key.width = unit(1.5,"cm"), 
-        legend.position = "top", panel.background = element_rect(fill = "white", colour = "grey50"))                     
-
-                   
-#########################                   
+        legend.position = "top", panel.background = element_rect(fill = "white", colour = "grey50"))                                     
                    
 #Top 25 countries by count of threatened species                   
 length(unique(countsum$NAME_EN[countsum$TotalThreatened>62]))
-#25
-plotB <- countsum[countsum$TotalThreatened>62 & (countsum$AWiucn == "EN" | countsum$AWiucn == "CR" |countsum$AWiucn == "VU" | countsum$AWiucn == "EW"),]
-                   
+plotB <- countsum[countsum$TotalThreatened>62 & (countsum$AWiucn == "EN" | countsum$AWiucn == "CR" |countsum$AWiucn == "VU" | countsum$AWiucn == "EW"),]                 
 b<- ggplot(data=plotB, aes(x=reorder(NAME_EN, TotalThreatened), y=CategoryCount, fill=AWiucn)) +
   geom_bar(stat="identity", color="black", size=0.4, width=0.8)+
   labs(title="B.") +
@@ -136,32 +133,11 @@ b<- ggplot(data=plotB, aes(x=reorder(NAME_EN, TotalThreatened), y=CategoryCount,
         legend.key.height = unit(1, "cm"), 
         legend.key.width = unit(1.5,"cm"), 
         legend.position = "top", 
-        panel.background = element_rect(fill = "white", colour = "grey50"))                    
-##############################                   
-
-#For unprotected species only, summarize by each category per country
-unprosum <- country[country$WDPA_PID=="NotProtected",] %>%
-  dplyr::group_by(NAME_EN, AWiucn) %>%                   
-  dplyr::summarise(PAstatus="NotProtected", PACatCount = length(unique(binomial)))                   
-#For protected species only, summarize by each category per country
-prosum <- country[country$WDPA_PID!="NotProtected",] %>%
-  dplyr::group_by(NAME_EN, AWiucn) %>%                   
-  dplyr::summarise(PAstatus="Protected", PACatCount = length(unique(binomial))) 
-
-totes <- rbind(unprosum, prosum) 
-totes <- join(totes, totsum, by="NAME_EN")
-#I want levels to be ordered by endangerement
-totes$AWiucn <- factor(totes$AWiucn, levels = rev(c("EX", "EW", "CR", "EN", "VU", "NT", "LC", "DD", "In assessment")))
-totes <- filter(totes, !is.na(AWiucn)) 
-                   
-###############################                   
+        panel.background = element_rect(fill = "white", colour = "grey50"))                        
                    
 #Top 10 countries by count of unprotected species                   
 length(unique(totes$NAME_EN[totes$TotalUnprotected>20]))
-#26
 plotC <- totes[totes$TotalUnprotected>20,]
-                   
-
 c<-ggplot(data=plotC[plotC$PAstatus=="NotProtected",], aes(x=reorder(NAME_EN, TotalUnprotected), y=PACatCount, fill=AWiucn)) +
   geom_bar(stat="identity", color="black", size=0.4, width=0.8)+
   labs(title="C.") +
@@ -179,21 +155,17 @@ c<-ggplot(data=plotC[plotC$PAstatus=="NotProtected",], aes(x=reorder(NAME_EN, To
         legend.key.width = unit(1.5,"cm"), 
         legend.position = "right", 
         panel.background = element_rect(fill = "white", colour = "grey50"))    
-        
+
+# Plot these three together                   
 jpeg("../Figures/IUCNstatus_top10countries.jpg", width=3000, height=1000)
 plot_grid(a,b,c,nrow=1, rel_widths=c(1, 1, 1.3))
 dev.off()    
-                   
-                   
-                   
-##############3
-#SUPP FIGURE               
-                   
-#Top 10 DD countries                 
+                                  
+##############
+# Bonus: data deficient
+                            
 length(unique(countsum$NAME_EN[countsum$TotalDD>50]))
-#10
 plotD <- countsum[countsum$TotalDD>50& countsum$AWiucn == "DD",]
-
 jpeg("../Figures/IUCNstatus_top10DD.jpg", width=1000, height=1000)
 ggplot(data=plotD, aes(x=reorder(NAME_EN, TotalDD), y=TotalDD)) +
   geom_bar(stat="identity", color="black", size=0.4, width=0.8, fill="grey")+
