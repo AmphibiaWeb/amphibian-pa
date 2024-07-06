@@ -1,5 +1,12 @@
 #!/usr/bin/Rscript --vanilla
 
+# R language
+
+# Resamples terrestrial protected areas from the WDPA of different size categories
+#      to compare how networks composed of PAs of these different sizes accumulate
+#      unique amphibian species
+# Called on within the bash script growth_tables.sh 
+
 #Feed in command-line arguments
 #where arg 1 is a list of PAs in a given size category
 #and arg 2 is the name of the output file (tracking cumulative number of amphibian species with protected area)
@@ -8,9 +15,9 @@ args = commandArgs(trailingOnly=TRUE)
 #Read in the substrate files
 PA_list <- read.csv(args[1], row.names=NULL)
 PA_list <- PA_list$X808
-SpPA <- read.csv("SpPA.csv")
+SpPA <- read.csv("All_Amphibia with WDPA one to many")
 SpPA$WDPA_PID[SpPA$WDPA_PID == ""] <- "NotProtected"
-wdpa <- read.csv("wdpa.csv")
+wdpa <- read.csv("WDPA_all.csv")
 
 #Fix a few columns
 #We need to take out marine area from what we're considering as protected area size!
